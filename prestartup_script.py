@@ -12,6 +12,11 @@ import ast
 import logging
 import traceback
 
+# Local managed Mac environment: startup must not mutate the pinned runtime or
+# replay queued downloads/installers. Explicit interactive Manager actions are
+# unchanged; opt in only after reviewing queued scripts and dependency changes.
+_allow_startup_installs = os.environ.get("COMFYUI_MANAGER_ALLOW_STARTUP_INSTALLS") == "1"
+
 glob_path = os.path.join(os.path.dirname(__file__), "glob")
 sys.path.append(glob_path)
 
@@ -480,7 +485,10 @@ def ensure_dependencies():
         # maybe we should sys.exit() here? there is at least two screens worth of error messages still being pumped after our error messages
         print("## [ERROR] ComfyUI-Manager: GitPython package seems to be installed, but failed to load somehow. Make sure you have a working git client installed")
 
-ensure_dependencies()
+if _allow_startup_installs:
+    ensure_dependencies()
+else:
+    print("[ComfyUI-Manager] Automatic startup dependency installation is disabled (managed Mac environment).")
 
 
 print("** ComfyUI startup time:", current_timestamp())
@@ -583,7 +591,7 @@ def is_installed(name):
     return True       # prevent downgrade
 
 
-if os.path.exists(restore_snapshot_path):
+if _allow_startup_installs and os.path.exists(restore_snapshot_path):
     try:
         cloned_repos = []
 
@@ -806,14 +814,18 @@ def execute_startup_script():
 
 # Check if script_list_path exists
 # Block startup-scripts on old ComfyUI (security measure)
-if not _has_system_user_api:
+if not _allow_startup_installs:
+    if os.path.exists(script_list_path) or os.path.exists(restore_snapshot_path):
+        print("[ComfyUI-Manager] Queued startup operations preserved but not executed. Review before setting COMFYUI_MANAGER_ALLOW_STARTUP_INSTALLS=1.")
+elif not _has_system_user_api:
     if os.path.exists(script_list_path):
         print("[ComfyUI-Manager] Startup scripts blocked on old ComfyUI version.")
 elif os.path.exists(script_list_path):
     execute_startup_script()
 
 
-pip_fixer.fix_broken()
+if _allow_startup_installs:
+    pip_fixer.fix_broken()
 
 del processed_install
 del pip_fixer
